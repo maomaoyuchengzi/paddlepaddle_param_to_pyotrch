@@ -4,9 +4,11 @@ import tempfile
 import paddle.fluid as fluid
 from mobilenet_v3 import MobileNetV3_Small_
 import numpy as np
-from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, Sequential, Module, Parameter,LSTM, Linear
+from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, Sequential, Module, Parameter, LSTM, Linear
 import torch
 from mobilenet_v3 import BidirectionalLSTM
+import copy
+
 
 def _load_state(path):
     """
@@ -25,17 +27,20 @@ def _load_state(path):
         state = fluid.io.load_program_state(path)
     return state
 
+
 class InitModel:
     """
     进行参数拷贝
     """
+
     def __init__(self, paddlepaddle_state, pt_model):
         self.net_pytorch = pt_model
         self.state_pp = paddlepaddle_state
         self.list_layers = list(self.state_pp.keys())
+        self.temp_list_layers = copy.deepcopy(self.list_layers)
         # self.pass_layer = []
+        print(f'总的层数为:{len(self.list_layers)}')
         self.init_model()
-
 
     def init_model(self):
         for n, m in self.net_pytorch.named_modules():
@@ -55,8 +60,11 @@ class InitModel:
             #            pass
             #        elif isinstance(m1, Linear):
             #            self.fc_init(n1, m1)
-
-        torch.save(self.net_pytorch.state_dict(),"/home/fuxueping/sdb/CODE/ocr/PaddleOCR/ch_lite/mobilenetV3_small.pth")
+        print('=='*10)
+        print(f'未能转换层数为：{len(self.list_layers)}')
+        for key in self.list_layers:
+            print(f'{key}: {self.state_pp[key].shape}')
+        torch.save(self.net_pytorch.state_dict(), "mobilenetV3_small.pth")
 
     def LSTM(self, layer, m):
         m[0].weight_ih_l0 = 0
@@ -73,10 +81,10 @@ class InitModel:
         m.weight.data.copy_(torch.FloatTensor(self.state_pp['层名']))
         m.bias.data.copy_(torch.FloatTensor(self.state_pp['层名']))
 
-    def bn_init(self, layer , m):
-        for key in self.list_layers:
+    def bn_init(self, layer, m):
+        for key in self.temp_list_layers:
             if (layer in key) and ('bn' in key):
-                print(key) #, ' -- shape: ', self.state_pp[key].shape)
+                print(key)  # , ' -- shape: ', self.state_pp[key].shape)
                 if 'scale' in key:
                     m.weight.data.copy_(torch.FloatTensor(self.state_pp[key]))
                     self.list_layers.remove(key)
@@ -90,19 +98,17 @@ class InitModel:
                     m.running_var.copy_(torch.FloatTensor(self.state_pp[key]))
                     self.list_layers.remove(key)
 
-
     def conv_init(self, layer, m):
         # for pr in net.params:
         layer_ = layer+'_'
-        for key in self.list_layers:
+        for key in self.temp_list_layers:
             if (layer_ in key) and ('bn' not in key):
-                print(key) #, ' -- shape: ', self.state_pp[key].shape)
+                print(key)  # , ' -- shape: ', self.state_pp[key].shape)
                 if 'weights' in key:
                     m.weight.data.copy_(torch.FloatTensor(self.state_pp[key]))
                 elif 'offset' in key:
-                    m.bias.data.copy_(self.state_pp[key])
+                    m.bias.data.copy_(torch.FloatTensor(self.state_pp[key]))
                 self.list_layers.remove(key)
-
 
     # def prelu_init(self, layer, m):
     #     if layer in self.list_layers:
@@ -112,17 +118,16 @@ class InitModel:
     #     if layer in self.list_layers:
     #        self.net_caffe.params[layer][0].data[:] = m.weight.data.cpu().numpy()
 
-if __name__=="__main__":
-    #加载paddlepaddle的模型
-    path = './rec_mv3_crnn/best_accuracy'
+
+if __name__ == "__main__":
+    # 加载paddlepaddle的模型
+    path = 'rec_mv3_crnn/best_accuracy'
     paddlepaddle_state = _load_state(path)
 
-    #加载pytorch的模型
+    # 加载pytorch的模型
     char_set = open('./char_std_6015.txt', 'r', encoding='utf-8').readlines()
     # char_set = ''.join([ch.strip('\n') for ch in char_set[1:]] + ['卍'])
     n_class = len(char_set)
 
     pt_model = MobileNetV3_Small_(32, 1, n_class, 192)
     object = InitModel(paddlepaddle_state, pt_model)
-
-
